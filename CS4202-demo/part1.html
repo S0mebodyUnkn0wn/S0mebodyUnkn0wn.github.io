@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html data-lt-installed="true">
+    <head>
+        <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+    </head>
+    <body style="display: flex; padding: 0; margin: 0">
+        <canvas width="1024" height="1024" id="gl-canvas">
+            Sorry; your web browser does not support HTML5’s canvas element.
+        </canvas>
+        <div style="display: flex; flex-direction: column; padding: 1em">
+            <h2>Demo control panel</h2>
+            <div style="display: flex; gap: 10px">
+                <a> part 1 </a>
+                <a href="./part2.html"> part 2 </a>
+                <a href="./part3.html">part 3 </a>
+                <a href="./part4.html"> part 4 </a>
+            </div>
+            <p>
+                The scene can be rotated using your mouse/touchpad vertical and
+                horizontal scroll, and zoomed by scrolling with ctrl pressed
+                down
+                <br />
+                (If your input device doesn't support horizontal scroll, you can
+                hold down alt to transform your verical scroll to horizontal)
+            </p>
+            <h3>Animation Controls</h3>
+            <button id="anim-toggle">Toggle Animation</button>
+            <h3>Projection Mode</h3>
+            <select id="proj-selector">
+                <option value="oblq">Oblique</option>
+                <option value="orth">Orthogonal</option>
+            </select>
+        </div>
+        <script
+            src="https://cdnjs.cloudflare.com/ajax/libs/gl-matrix/2.8.1/gl-matrix-min.js"
+            type="text/javascript"
+        ></script>
+        <script>
+            /**
+             * This function initialises GL and the viewport.
+             */
+            function glInit() {
+                // Initialise and clear viewport
+                gl.clearColor(0.1, 0.1, 0.1, 0.9);
+                gl.clearDepth(1.0);
+                gl.viewport(0.0, 0.0, canvas.width, canvas.height);
+                gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+                gl.enable(gl.DEPTH_TEST);
+            }
+
+            function createProgram(vertCode, fragCode) {
+                // Compile and upload shader programs
+                let vertShader = gl.createShader(gl.VERTEX_SHADER);
+                gl.shaderSource(vertShader, vertCode);
+                gl.compileShader(vertShader);
+
+                let fragShader = gl.createShader(gl.FRAGMENT_SHADER);
+                gl.shaderSource(fragShader, fragCode);
+                gl.compileShader(fragShader);
+
+                let shaderprogram = gl.createProgram();
+                gl.attachShader(shaderprogram, vertShader);
+                gl.attachShader(shaderprogram, fragShader);
+                gl.linkProgram(shaderprogram);
+
+                gl.useProgram(shaderprogram);
+
+                return shaderprogram;
+            }
+
+            function makeF32ArrayBuff(data) {
+                let buf = gl.createBuffer();
+                gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+                gl.bufferData(
+                    gl.ARRAY_BUFFER,
+                    new Float32Array(data.flat()),
+                    gl.STATIC_DRAW
+                );
+                return buf;
+            }
+            function makeUInt16ArrayBuff(data) {
+                let buf = gl.createBuffer();
+                gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buf);
+                gl.bufferData(
+                    gl.ELEMENT_ARRAY_BUFFER,
+                    new Uint16Array(data.flat()),
+                    gl.STATIC_DRAW
+                );
+                return buf;
+            }
+
+            function initObject(object, shaderprogram) {
+                gl.useProgram(shaderprogram);
+
+                let n_verts = object.indices.flat().length;
+
+                let vertex_buffer = makeF32ArrayBuff(object.vertices);
+                let index_buffer = makeUInt16ArrayBuff(object.indices);
+                let normal_buffer = makeF32ArrayBuff(object.normals);
+                let texcoords_buffer = makeF32ArrayBuff(object.texcoords);
+
+                let color_buffer = makeF32ArrayBuff(object.colors);
+                return {
+                    vertex_buffer,
+                    index_buffer,
+                    color_buffer,
+                    normal_buffer,
+                    texcoords_buffer,
+                    n_verts,
+                };
+            }
+
+            function drawObject(objectBuf, shaderprogram) {
+                gl.useProgram(shaderprogram);
+
+                // Bind buffers
+                gl.bindBuffer(gl.ARRAY_BUFFER, objectBuf.vertex_buffer);
+                let aPosition = gl.getAttribLocation(
+                    shaderprogram,
+                    "aPosition"
+                );
+                gl.vertexAttribPointer(aPosition, 4, gl.FLOAT, false, 0, 0);
+                gl.enableVertexAttribArray(aPosition);
+
+                gl.bindBuffer(gl.ARRAY_BUFFER, objectBuf.color_buffer);
+                let aColor = gl.getAttribLocation(shaderprogram, "aColor");
+                gl.vertexAttribPointer(aColor, 4, gl.FLOAT, false, 0, 0);
+                gl.enableVertexAttribArray(aColor);
+
+                if (objectBuf.texture) {
+                    gl.activeTexture(objectBuf.texture.textureI);
+                    let uTexture = gl.getUniformLocation(
+                        shaderprogram,
+                        "uTexture"
+                    );
+                    gl.uniform1i(uTexture, objectBuf.texture.i);
+                }
+                // We'll use this flag to default to using vertices' colors if no texture is specified.
+                let uUseColor = gl.getUniformLocation(
+                    shaderprogram,
+                    "uUseColor"
+                );
+
+                gl.uniform1i(uUseColor, objectBuf.texture === undefined);
+
+                let aTexCoord = gl.getAttribLocation(
+                    shaderprogram,
+                    "aTexCoord"
+                );
+                gl.bindBuffer(gl.ARRAY_BUFFER, objectBuf.texcoords_buffer);
+                gl.vertexAttribPointer(aTexCoord, 2, gl.FLOAT, false, 0, 0);
+                gl.enableVertexAttribArray(aTexCoord);
+
+                gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, objectBuf.index_buffer);
+
+                gl.drawElements(
+                    gl.TRIANGLES,
+                    objectBuf.n_verts,
+                    gl.UNSIGNED_SHORT,
+                    0
+                );
+            }
+
+            // Object loader from part 4.
+            // It's easier and cleaner to load objects from file
+            // Than defining them in code, so I've implemented this together with
+            // Part 1
+            function loadObjFile(resourceLocation) {
+                return fetch(resourceLocation)
+                    .then((response) => response.text())
+                    .then((objectFileTxt) => {
+                        let object = {
+                            vertices: [],
+                            colors: [],
+                            indices: [],
+                            normals: [],
+                            texcoords: [],
+                        };
+                        // We'll need to reorder uv coords and normals, so we'll write them on the side (not into the object itself)
+                        let texture_points = [];
+                        let normal_points = [];
+                        let lines = objectFileTxt.split("\n");
+                        for (let line of lines) {
+                            // Trim leading/trainling whitespace and split on whitespace.
+                            let chunks = line.trim().split(/\s+/);
+                            // Ignore comments
+                            if (chunks[0].startsWith("#")) {
+                                continue;
+                            }
+                            // Vertex
+                            if (chunks[0] === "v") {
+                                object.vertices.push([
+                                    Number(chunks[1]),
+                                    Number(chunks[2]),
+                                    Number(chunks[3]),
+                                    Number(1),
+                                ]);
+                            }
+
+                            // Normal
+                            if (chunks[0] === "vn") {
+                                normal_points.push([
+                                    Number(chunks[1]),
+                                    Number(chunks[2]),
+                                    Number(chunks[3]),
+                                    Number(0),
+                                ]);
+                            }
+
+                            // Texcoord
+                            if (chunks[0] === "vt") {
+                                texture_points.push([
+                                    Number(chunks[1]),
+                                    Number(chunks[2]),
+                                ]);
+                            }
+
+                            // Face
+                            if (chunks[0] === "f") {
+                                // Get each bit of the a/b/c syntax
+                                let nodes = chunks
+                                    .slice(1)
+                                    .map((x) => x.split("/"));
+
+                                // The list for the indicies of a face
+                                let vert_indexes = [];
+
+                                // Choose a color based on a face index, mostly done so that we get a colorful object even if we don't apply a texture to it
+                                let face_i = (object.indices.length % 7) + 1;
+                                let color = [
+                                    (face_i >> 2) % 2,
+                                    (face_i >> 1) % 2,
+                                    face_i % 2,
+                                    0,
+                                ];
+
+                                // Code below assumes that all 3 parts of the a/b/c syntax will be specified.
+                                // This is not guranteed by obj spec, however I think that this is a reasonable shortcut, as otherwise we would need to implement functionality for calculating uv coords and normals, which seems out of scope for this practical
+                                for (let node of nodes) {
+                                    let vertex_ind = Number(node[0]) - 1;
+                                    vert_indexes.push(vertex_ind);
+
+                                    // JS allows out-of-bounds array assignment
+                                    // This is very convinient:
+                                    // Insert uv coord at the corresponding vertex index
+                                    object.texcoords[vertex_ind] =
+                                        texture_points[Number(node[1]) - 1];
+                                    // Insert normal vector at the corresponding vertex index
+                                    object.normals[vertex_ind] =
+                                        normal_points[Number(node[2] - 1)];
+                                    // Insert vertex color at a corresponding vertex index
+                                    object.colors[vertex_ind] = color;
+                                }
+
+                                object.indices.push(vert_indexes);
+                            }
+                            // In this implementation we ignore other lines like "s", as our renderer doesn't support those features anyway
+                        }
+
+                        return object;
+                    });
+            }
+
+            function toggle_anim() {
+                if (is_animation_playing) {
+                    is_animation_playing = false;
+                } else {
+                    // Reset the frame timer, so we can calculate a fresh delta
+                    last_frame_time = performance.now();
+                    is_animation_playing = true;
+                    requestAnimationFrame(render);
+                }
+            }
+
+            function select_projection(event) {
+                projection_type = event.target.value;
+                update_projection_mx();
+                if (!is_animation_playing) render();
+            }
+
+            function handle_wheel_input(event) {
+                // Prevent default scroll handling
+                // (some browsers use horizontal scrolling to naviagte history)
+                event.preventDefault();
+                const r_speed = 0.001;
+                const t_speed = 0.001;
+
+                if (event.ctrlKey) {
+                    camera_distance += event.deltaY * t_speed || 0;
+                } else if (event.altKey) {
+                    let camera_rz = event.deltaY * r_speed;
+                    camera_rotation[2] += camera_rz || 0;
+                } else {
+                    let camera_ry = event.deltaY * r_speed;
+                    let camera_rz = event.deltaX * r_speed;
+
+                    camera_rotation[1] += camera_ry || 0;
+                    camera_rotation[2] += camera_rz || 0;
+                }
+
+                update_camera_mx();
+            }
+
+            // Position camera, based on the value of the value of the globals
+            function update_camera_mx() {
+                // Generate a basic lookat matrix
+                mat4.lookAt(
+                    M_view,
+                    [camera_distance, 0, 0],
+                    [0, 0, 0],
+                    [0, 0, 1]
+                );
+
+                let M_view_transform = mat4.create();
+                let M_view_ry = mat4.create();
+                // We want to rotate over a local Y
+                // (much easier to keep track), so we'll make a unit vector for +y, rotate, the same way we do the object, and use that as an axis for rotation
+                let vec_local_y = vec3.fromValues(0, 1, 0);
+
+                let M_view_rz = mat4.create();
+                // For z rotation, we want to use the global z, so we can use the buit in function
+                mat4.fromZRotation(M_view_rz, camera_rotation[2]);
+
+                // Follow the object's rotation with the +y vector
+                vec3.rotateZ(
+                    vec_local_y,
+                    vec_local_y,
+                    [0, 0, 0],
+                    -camera_rotation[2]
+                );
+
+                // Apply the local y rotation
+                mat4.fromRotation(M_view_ry, camera_rotation[1], vec_local_y);
+
+                // Make a tranform matrix
+                mat4.multiply(M_view_transform, M_view_rz, M_view_ry);
+
+                // Apply the transform
+                mat4.multiply(M_view, M_view, M_view_transform);
+
+                // Bind matrix to shader vars
+                let ViewLoc = gl.getUniformLocation(
+                    shaderprogram,
+                    "uViewMatrix"
+                );
+                gl.uniformMatrix4fv(ViewLoc, false, new Float32Array(M_view));
+
+                // We might also need to update a projection matrix, afeter moving the camera, so we'll do that now
+                // (if the camera distance got changed)
+                update_projection_mx();
+
+                // If we're not in an animation loop, we need a manual rerender
+                if (!is_animation_playing) render();
+            }
+
+            function update_projection_mx() {
+                let M_Proj = mat4.create();
+                switch (projection_type) {
+                    case "orth":
+                        mat4.ortho(
+                            M_Proj,
+                            -camera_distance,
+                            camera_distance,
+                            -camera_distance,
+                            camera_distance,
+                            0,
+                            camera_distance * 5
+                        );
+                        break;
+                    case "oblq":
+                        // oblique projection is an orthographic projection with shear
+                        // (or rotation, both transofrms should give the same result)
+                        mat4.ortho(
+                            M_Proj,
+                            -camera_distance,
+                            camera_distance,
+                            -camera_distance,
+                            camera_distance,
+                            0,
+                            camera_distance * 5
+                        );
+                        // Angle is arbitrary
+                        let angle = (85 * Math.PI) / 180;
+                        let M_shear = mat4.fromValues(
+                            ...[1, 0, 0, 0],
+                            ...[0, 1, 0, 0],
+                            ...[
+                                1 / Math.tan(-angle),
+                                1 / Math.tan(-angle),
+                                1,
+                                0,
+                            ],
+                            ...[0, 0, 0, 1]
+                        );
+
+                        mat4.multiply(M_Proj, M_Proj, M_shear);
+
+                        break;
+                }
+                let ProjLoc = gl.getUniformLocation(
+                    shaderprogram,
+                    "uProjectionMatrix"
+                );
+                gl.uniformMatrix4fv(ProjLoc, false, new Float32Array(M_Proj));
+            }
+
+            function addObjectToScene(object) {
+                object.model_matrix = mat4.create();
+                objectData.push(object);
+                objectBuffers.push(initObject(object, shaderprogram));
+                if (!is_animation_playing) render();
+                return object;
+            }
+
+            // GLSL shader code
+            const vertCode = `
+                attribute vec4 aPosition;
+                attribute vec4 aColor;
+                attribute vec2 aTexCoord;
+
+                varying vec4 vColor;
+                varying vec2 vTexCoord;
+                varying vec3 vLighting;
+
+                uniform mat4 uViewMatrix;
+                uniform mat4 uProjectionMatrix;
+                uniform mat4 uModelMatrix;
+
+                void main() {
+                    gl_Position = uProjectionMatrix * uViewMatrix * uModelMatrix * aPosition;
+
+                    highp vec3 ambientLight = vec3(0.75, 0.75, 0.75);
+
+                    vLighting = ambientLight;
+                    vColor = aColor;
+                    vTexCoord = aTexCoord;
+
+                }
+            `;
+
+            const fragCode = `
+                precision mediump float;
+
+                varying vec4 vColor;
+                varying vec2 vTexCoord;
+                varying vec3 vLighting;
+
+                uniform bool uUseColor;
+                uniform sampler2D uTexture;
+
+                void main() {
+                    lowp vec4 t = texture2D(uTexture, vTexCoord);
+
+                    if (uUseColor){
+                        t = vColor;
+                    }
+                    gl_FragColor = vec4(t.rgb * vLighting, 255);
+                }
+            `;
+
+            function render(now) {
+                if (!now) now = performance.now();
+                let delta = now - last_frame_time;
+                last_frame_time = now;
+
+                let default_anim_speed = 0.002;
+
+                gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+                for (let i = 0; i < objectBuffers.length; i++) {
+                    let object = objectData[i];
+                    if (object.texture)
+                        objectBuffers[i].texture = object.texture;
+
+                    if (is_animation_playing && object.animation) {
+                        let anim_speed = object.animation_speed
+                            ? object.animation_speed
+                            : default_anim_speed;
+                        object.animation(delta, anim_speed);
+                    }
+
+                    let ModelLoc = gl.getUniformLocation(
+                        shaderprogram,
+                        "uModelMatrix"
+                    );
+                    gl.uniformMatrix4fv(
+                        ModelLoc,
+                        false,
+                        new Float32Array(object.model_matrix)
+                    );
+
+                    drawObject(objectBuffers[i], shaderprogram);
+                }
+                if (is_animation_playing) requestAnimationFrame(render);
+            }
+
+            function loadTexture(resource, textureI, i) {
+                // Create and store data into texture buffer
+                let texture = gl.createTexture();
+                gl.activeTexture(textureI);
+                // Image loading adapted from Lab-3
+                gl.bindTexture(gl.TEXTURE_2D, texture);
+                gl.texImage2D(
+                    gl.TEXTURE_2D,
+                    0,
+                    gl.RGBA,
+                    1,
+                    1,
+                    0,
+                    gl.RGBA,
+                    gl.UNSIGNED_BYTE,
+                    new Uint8Array([127, 127, 255, 255])
+                );
+
+                var image = new Image();
+
+                image.addEventListener("load", function () {
+                    gl.activeTexture(textureI);
+                    gl.bindTexture(gl.TEXTURE_2D, texture);
+                    gl.texImage2D(
+                        gl.TEXTURE_2D,
+                        0,
+                        gl.RGBA,
+                        gl.RGBA,
+                        gl.UNSIGNED_BYTE,
+                        image
+                    );
+                    gl.generateMipmap(gl.TEXTURE_2D);
+                    if (!is_animation_playing) render();
+                });
+
+                image.src = resource;
+                gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+                return { i: i, textureI: textureI, buffer: texture };
+            }
+
+            // =============== BEGIN INITIALISATION LOGIC ===============
+            // Create a canvas to paint on
+            var canvas = document.getElementById("gl-canvas");
+            var gl = canvas.getContext("webgl");
+            canvas.height = document.defaultView.innerHeight;
+            canvas.width = canvas.height;
+            canvas.addEventListener("wheel", handle_wheel_input);
+
+            let anim_toggle = document.getElementById("anim-toggle");
+            let proj_selector = document.getElementById("proj-selector");
+
+            anim_toggle.addEventListener("click", toggle_anim);
+            proj_selector.addEventListener("change", select_projection);
+
+            glInit();
+
+            // Globals
+            var last_frame_time = 0;
+            var is_animation_playing = true;
+            var camera_rotation = [0, 0, 0];
+            var camera_distance = 1.5;
+            var objectData = [];
+            var objectBuffers = [];
+            var projection_type = "oblq";
+            var textures = [];
+            var shaderprogram = createProgram(vertCode, fragCode);
+            var M_view = mat4.create();
+
+            proj_selector.value = projection_type;
+
+            // Load Textures
+            textures.push(
+                loadTexture("tex/amethyst-diffuse.jpg", gl.TEXTURE0, 0)
+            );
+
+            // Calculate camera and projection matrices, and directional light vector
+            update_camera_mx();
+
+            // Load objects
+            loadObjFile("obj/Ico.obj")
+                .then(addObjectToScene)
+                .then((object) => {
+                    object.texture = textures[0];
+                    object.animation_speed = 0.001;
+                    object.animation = (delta, anim_speed) => {
+                        let M_anim = mat4.create();
+                        mat4.rotateZ(M_anim, M_anim, delta * anim_speed);
+                        mat4.multiply(
+                            object.model_matrix,
+                            M_anim,
+                            object.model_matrix
+                        );
+                    };
+                    if (!is_animation_playing) render();
+                });
+
+            // Render
+            render();
+        </script>
+    </body>
+</html>

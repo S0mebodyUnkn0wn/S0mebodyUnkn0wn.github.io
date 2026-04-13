@@ -1,0 +1,1068 @@
+<!DOCTYPE html>
+<html data-lt-installed="true">
+    <head>
+        <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+    </head>
+    <body style="display: flex; padding: 0; margin: 0">
+        <canvas width="1024" height="1024" id="gl-canvas">
+            Sorry; your web browser does not support HTML5’s canvas element.
+        </canvas>
+        <div style="display: flex; flex-direction: column; padding: 1em">
+            <h2>Demo control panel</h2>
+            <div style="display: flex; gap: 10px">
+                <a href="./part1.html"> part 1 </a>
+                <a href="./part2.html"> part 2 </a>
+                <a> part 3 </a>
+                <a href="./part4.html"> part 4 </a>
+            </div>
+            <p>
+                The scene can be rotated using your mouse/touchpad vertical and
+                horizontal scroll, and zoomed by scrolling with ctrl pressed
+                down
+                <br />
+                (If your input device doesn't support horizontal scroll, you can
+                hold down alt to transform your verical scroll to horizontal)
+            </p>
+            <p>
+                The Cube, plane and icosahedron have normal maps applied to them
+            </p>
+            <h3>Animation Controls</h3>
+            <button id="anim-toggle">Toggle Animation</button>
+            <div>
+                <input type="checkbox" id="shearing-anim-toggle" />
+                <label for="sheadring-toggle">
+                    Enable shearing (as requried by part 2)
+                </label>
+            </div>
+            <div>
+                <input type="checkbox" id="dir-light-anim-toggle" />
+                <label for="sheadring-toggle">Animate directional light</label>
+            </div>
+            <h3>Projection Mode</h3>
+            <select id="proj-selector">
+                <option value="pers">Perspective</option>
+                <option value="orth">Orthogonal</option>
+                <option value="oblq">Oblique</option>
+            </select>
+            <h3>Directional Light controls</h3>
+            <div>
+                <label>X axis</label
+                ><input
+                    min="-1"
+                    max="1"
+                    step="0.01"
+                    id="d-light-x"
+                    type="range"
+                />
+                <label>Y axis</label
+                ><input
+                    min="-1"
+                    max="1"
+                    step="0.01"
+                    id="d-light-y"
+                    type="range"
+                />
+                <label>Z axis</label
+                ><input
+                    min="-1"
+                    max="1"
+                    step="0.01"
+                    id="d-light-z"
+                    type="range"
+                />
+            </div>
+        </div>
+        <script
+            src="https://cdnjs.cloudflare.com/ajax/libs/gl-matrix/2.8.1/gl-matrix-min.js"
+            type="text/javascript"
+        ></script>
+        <script>
+            /**
+             * This function initialises GL and the viewport.
+             */
+            function glInit() {
+                // Initialise and clear viewport
+                gl.clearColor(0.1, 0.1, 0.1, 0.9);
+                gl.clearDepth(1.0);
+                gl.viewport(0.0, 0.0, canvas.width, canvas.height);
+                gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+                gl.enable(gl.DEPTH_TEST);
+            }
+
+            function createProgram(vertCode, fragCode) {
+                // Compile and upload shader programs
+                let vertShader = gl.createShader(gl.VERTEX_SHADER);
+                gl.shaderSource(vertShader, vertCode);
+                gl.compileShader(vertShader);
+
+                let fragShader = gl.createShader(gl.FRAGMENT_SHADER);
+                gl.shaderSource(fragShader, fragCode);
+                gl.compileShader(fragShader);
+
+                let shaderprogram = gl.createProgram();
+                gl.attachShader(shaderprogram, vertShader);
+                gl.attachShader(shaderprogram, fragShader);
+                gl.linkProgram(shaderprogram);
+
+                gl.useProgram(shaderprogram);
+
+                return shaderprogram;
+            }
+
+            function makeF32ArrayBuff(data) {
+                let buf = gl.createBuffer();
+                gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+                gl.bufferData(
+                    gl.ARRAY_BUFFER,
+                    new Float32Array(data.flat()),
+                    gl.STATIC_DRAW
+                );
+                return buf;
+            }
+            function makeUInt16ArrayBuff(data) {
+                let buf = gl.createBuffer();
+                gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buf);
+                gl.bufferData(
+                    gl.ELEMENT_ARRAY_BUFFER,
+                    new Uint16Array(data.flat()),
+                    gl.STATIC_DRAW
+                );
+                return buf;
+            }
+
+            function initObject(object, shaderprogram) {
+                gl.useProgram(shaderprogram);
+
+                let n_verts = object.indices.flat().length;
+
+                let vertex_buffer = makeF32ArrayBuff(object.vertices);
+                let index_buffer = makeUInt16ArrayBuff(object.indices);
+                let normal_buffer = makeF32ArrayBuff(object.normals);
+                let texcoords_buffer = makeF32ArrayBuff(object.texcoords);
+                let tangent_buffer = makeF32ArrayBuff(object.tangent);
+                let bitangent_buffer = makeF32ArrayBuff(object.bitangent);
+
+                let color_buffer = makeF32ArrayBuff(object.colors);
+                return {
+                    vertex_buffer,
+                    index_buffer,
+                    color_buffer,
+                    normal_buffer,
+                    texcoords_buffer,
+                    tangent_buffer,
+                    bitangent_buffer,
+                    n_verts,
+                };
+            }
+
+            function drawObject(objectBuf, shaderprogram) {
+                gl.useProgram(shaderprogram);
+
+                // Bind buffers
+                gl.bindBuffer(gl.ARRAY_BUFFER, objectBuf.vertex_buffer);
+                let aPosition = gl.getAttribLocation(
+                    shaderprogram,
+                    "aPosition"
+                );
+                gl.vertexAttribPointer(aPosition, 4, gl.FLOAT, false, 0, 0);
+                gl.enableVertexAttribArray(aPosition);
+
+                gl.bindBuffer(gl.ARRAY_BUFFER, objectBuf.color_buffer);
+                let aColor = gl.getAttribLocation(shaderprogram, "aColor");
+                gl.vertexAttribPointer(aColor, 4, gl.FLOAT, false, 0, 0);
+                gl.enableVertexAttribArray(aColor);
+
+                gl.bindBuffer(gl.ARRAY_BUFFER, objectBuf.normal_buffer);
+                let aNormal = gl.getAttribLocation(shaderprogram, "aNormal");
+                gl.vertexAttribPointer(aNormal, 4, gl.FLOAT, false, 0, 0);
+                gl.enableVertexAttribArray(aNormal);
+
+                gl.bindBuffer(gl.ARRAY_BUFFER, objectBuf.tangent_buffer);
+                let aTangent = gl.getAttribLocation(shaderprogram, "aTangent");
+                gl.vertexAttribPointer(aTangent, 4, gl.FLOAT, false, 0, 0);
+                gl.enableVertexAttribArray(aTangent);
+
+                gl.bindBuffer(gl.ARRAY_BUFFER, objectBuf.bitangent_buffer);
+                let aBitangent = gl.getAttribLocation(
+                    shaderprogram,
+                    "aBitangent"
+                );
+                gl.vertexAttribPointer(aBitangent, 4, gl.FLOAT, false, 0, 0);
+                gl.enableVertexAttribArray(aBitangent);
+
+                if (objectBuf.texture) {
+                    let uTexture = gl.getUniformLocation(
+                        shaderprogram,
+                        "uTexture"
+                    );
+                    gl.uniform1i(uTexture, objectBuf.texture.i);
+                }
+                // We'll use this flag to default to using vertices' colors if no texture is specified
+                let uUseColor = gl.getUniformLocation(
+                    shaderprogram,
+                    "uUseColor"
+                );
+
+                gl.uniform1i(uUseColor, objectBuf.texture === undefined);
+
+                if (objectBuf.normal_map) {
+                    let uNormalMap = gl.getUniformLocation(
+                        shaderprogram,
+                        "uNormalMap"
+                    );
+                    gl.uniform1i(uNormalMap, objectBuf.normal_map.i);
+                }
+
+                // We'll use to show that the object we're rendering has a normal map
+                let uUseNormalMap = gl.getUniformLocation(
+                    shaderprogram,
+                    "uUseNormalMap"
+                );
+                gl.uniform1i(uUseNormalMap, objectBuf.normal_map !== undefined);
+
+                let aTexCoord = gl.getAttribLocation(
+                    shaderprogram,
+                    "aTexCoord"
+                );
+                gl.bindBuffer(gl.ARRAY_BUFFER, objectBuf.texcoords_buffer);
+                gl.vertexAttribPointer(aTexCoord, 2, gl.FLOAT, false, 0, 0);
+                gl.enableVertexAttribArray(aTexCoord);
+
+                gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, objectBuf.index_buffer);
+
+                gl.drawElements(
+                    gl.TRIANGLES,
+                    objectBuf.n_verts,
+                    gl.UNSIGNED_SHORT,
+                    0
+                );
+            }
+
+            // Fucntion to load a mesh from a .obj file, as requred in part 4
+            function loadObjFile(resourceLocation) {
+                return fetch(resourceLocation)
+                    .then((response) => response.text())
+                    .then((objectFileTxt) => {
+                        let object = {
+                            vertices: [],
+                            colors: [],
+                            indices: [],
+                            normals: [],
+                            tangent: [],
+                            bitangent: [],
+                            texcoords: [],
+                        };
+                        // We'll need to reorder uv coords and normals, so we'll write them on the side (not into the object itself)
+                        let texture_points = [];
+                        let normal_points = [];
+                        let lines = objectFileTxt.split("\n");
+                        for (let line of lines) {
+                            // Trim leading/trainling whitespace and split on whitespace.
+                            let chunks = line.trim().split(/\s+/);
+                            // Ignore comments
+                            if (chunks[0].startsWith("#")) {
+                                continue;
+                            }
+                            // Vertex
+                            if (chunks[0] === "v") {
+                                object.vertices.push([
+                                    Number(chunks[1]),
+                                    Number(chunks[2]),
+                                    Number(chunks[3]),
+                                    Number(1),
+                                ]);
+                            }
+
+                            // Normal
+                            if (chunks[0] === "vn") {
+                                normal_points.push([
+                                    Number(chunks[1]),
+                                    Number(chunks[2]),
+                                    Number(chunks[3]),
+                                    Number(0),
+                                ]);
+                            }
+
+                            // Texcoord
+                            if (chunks[0] === "vt") {
+                                texture_points.push([
+                                    Number(chunks[1]),
+                                    Number(chunks[2]),
+                                ]);
+                            }
+
+                            // Face
+                            if (chunks[0] === "f") {
+                                // Get each bit of the a/b/c syntax
+                                let nodes = chunks
+                                    .slice(1)
+                                    .map((x) => x.split("/"));
+
+                                // The list for the indicies of a face
+                                let vert_indexes = [];
+
+                                // Choose a color based on a face index, mostly done so that we get a colorful object even if we don't apply a texture to it
+                                let face_i = (object.indices.length % 7) + 1;
+                                let color = [
+                                    (face_i >> 2) % 2,
+                                    (face_i >> 1) % 2,
+                                    face_i % 2,
+                                    0,
+                                ];
+
+                                // Code below assumes that all 3 parts of the a/b/c syntax will be specified.
+                                // This is not guranteed by obj spec, however I think that this is a reasonable shortcut, as otherwise we would need to implement functionality for calculating uv coords and normals, which seems out of scope for this practical
+                                for (let node of nodes) {
+                                    let vertex_ind = Number(node[0]) - 1;
+                                    vert_indexes.push(vertex_ind);
+
+                                    // JS allows out-of-bounds array assignment
+                                    // This is very convinient:
+                                    // Insert uv coord at the corresponding vertex index
+                                    object.texcoords[vertex_ind] =
+                                        texture_points[Number(node[1]) - 1];
+                                    // Insert normal vector at the corresponding vertex index
+                                    object.normals[vertex_ind] =
+                                        normal_points[Number(node[2] - 1)];
+                                    // Insert vertex color at a corresponding vertex index
+                                    object.colors[vertex_ind] = color;
+                                }
+
+                                let { tangent, bitangent } =
+                                    calculate_tan_and_bitan(
+                                        object,
+                                        vert_indexes[0],
+                                        vert_indexes[1],
+                                        vert_indexes[2]
+                                    );
+                                for (let vertex_ind of vert_indexes) {
+                                    object.tangent[vertex_ind] = tangent;
+                                    object.bitangent[vertex_ind] = bitangent;
+                                }
+
+                                object.indices.push(vert_indexes);
+                            }
+                            // In this implementation we ignore other lines like "s", as our renderer doesn't support those features anyway
+                        }
+                        return object;
+                    });
+            }
+
+            function calculate_tan_and_bitan(object, a, b, c) {
+                // Calculte tangent and bitangent vectors for normal mapping
+                // Method from https://learnopengl.com/Advanced-Lighting/Normal-Mapping
+                let v1 = vec3.fromValues(...object.vertices[a].slice(0, 3));
+                let v2 = vec3.fromValues(...object.vertices[b].slice(0, 3));
+                let v3 = vec3.fromValues(...object.vertices[c].slice(0, 3));
+
+                let tex1 = vec2.fromValues(...object.texcoords[a]);
+                let tex2 = vec2.fromValues(...object.texcoords[b]);
+                let tex3 = vec2.fromValues(...object.texcoords[c]);
+                let edge1 = vec3.sub(vec3.create(), v2, v1);
+                let edge2 = vec3.sub(vec3.create(), v3, v1);
+                let d_tex1 = vec2.sub(vec2.create(), tex2, tex1);
+                let d_tex2 = vec2.sub(vec2.create(), tex3, tex1);
+
+                let f = 1.0 / (d_tex1[0] * d_tex2[1] - d_tex2[0] * d_tex1[1]);
+                if (f === Infinity) f = 1;
+                let tangent = [
+                    f * (d_tex2[1] * edge1[0] - d_tex1[1] * edge2[0]),
+                    f * (d_tex2[1] * edge1[1] - d_tex1[1] * edge2[1]),
+                    f * (d_tex2[1] * edge1[2] - d_tex1[1] * edge2[2]),
+                    0,
+                ];
+                let bitangent = [
+                    f * (-d_tex2[0] * edge1[0] + d_tex1[0] * edge2[0]),
+                    f * (-d_tex2[0] * edge1[1] + d_tex1[0] * edge2[1]),
+                    f * (-d_tex2[0] * edge1[2] + d_tex1[0] * edge2[2]),
+                    0,
+                ];
+
+                return { tangent, bitangent };
+            }
+
+            function toggle_anim() {
+                if (is_animation_playing) {
+                    is_animation_playing = false;
+                } else {
+                    // Reset the frame timer, so we can calculate a fresh delta
+                    last_frame_time = performance.now();
+                    is_animation_playing = true;
+                    requestAnimationFrame(render);
+                }
+            }
+
+            function select_projection(event) {
+                projection_type = event.target.value;
+                update_projection_mx();
+                if (!is_animation_playing) render();
+            }
+
+            function move_directional_light(event) {
+                let i = 0;
+                switch (event.target.id) {
+                    case "d-light-x":
+                        break;
+                    case "d-light-y":
+                        i = 1;
+                        break;
+                    case "d-light-z":
+                        i = 2;
+                        break;
+                    default:
+                        return;
+                }
+                light_direction[i] = Number(event.target.value);
+
+                update_directional_light();
+                if (!is_animation_playing) render();
+            }
+
+            function handle_wheel_input(event) {
+                // Prevent default scroll handling
+                // (some browsers use horizontal scrolling to naviagte history)
+                event.preventDefault();
+                const r_speed = 0.001;
+                const t_speed = 0.001;
+
+                if (event.ctrlKey) {
+                    camera_distance += event.deltaY * t_speed || 0;
+                } else if (event.altKey) {
+                    let camera_rz = event.deltaY * r_speed;
+                    camera_rotation[2] += camera_rz || 0;
+                } else {
+                    let camera_ry = event.deltaY * r_speed;
+                    let camera_rz = event.deltaX * r_speed;
+
+                    camera_rotation[1] += camera_ry || 0;
+                    camera_rotation[2] += camera_rz || 0;
+                }
+
+                update_camera_mx();
+            }
+
+            // Position camera, based on the value of the value of the globals
+            function update_camera_mx() {
+                // Generate a basic lookat matrix
+                mat4.lookAt(
+                    M_view,
+                    [camera_distance, 0, 0],
+                    [0, 0, 0],
+                    [0, 0, 1]
+                );
+
+                let M_view_transform = mat4.create();
+                let M_view_ry = mat4.create();
+                // We want to rotate over a local Y
+                // (much easier to keep track), so we'll make a unit vector for +y, rotate, the same way we do the object, and use that as an axis for rotation
+                let vec_local_y = vec3.fromValues(0, 1, 0);
+
+                let M_view_rz = mat4.create();
+                // For z rotation, we want to use the global z, so we can use the buit in function
+                mat4.fromZRotation(M_view_rz, camera_rotation[2]);
+
+                // Follow the object's rotation with the +y vector
+                vec3.rotateZ(
+                    vec_local_y,
+                    vec_local_y,
+                    [0, 0, 0],
+                    -camera_rotation[2]
+                );
+
+                // Apply the local y rotation
+                mat4.fromRotation(M_view_ry, camera_rotation[1], vec_local_y);
+
+                // Make a tranform matrix
+                mat4.multiply(M_view_transform, M_view_rz, M_view_ry);
+
+                // Apply the transform
+                mat4.multiply(M_view, M_view, M_view_transform);
+
+                // Bind matrix to shader vars
+                let ViewLoc = gl.getUniformLocation(
+                    shaderprogram,
+                    "uViewMatrix"
+                );
+                gl.uniformMatrix4fv(ViewLoc, false, new Float32Array(M_view));
+
+                // We might also need to update a projection matrix, afeter moving the camera, so we'll do that now
+                // (if the camera distance got changed)
+                update_projection_mx();
+
+                // If we're not in an animation loop, we need a manual rerender
+                if (!is_animation_playing) render();
+            }
+
+            function update_projection_mx() {
+                let M_Proj = mat4.create();
+                switch (projection_type) {
+                    case "pers":
+                        mat4.perspective(
+                            M_Proj,
+                            0.5 * Math.PI,
+                            1,
+                            0.05,
+                            camera_distance * 5
+                        );
+                        break;
+                    case "orth":
+                        mat4.ortho(
+                            M_Proj,
+                            -camera_distance,
+                            camera_distance,
+                            -camera_distance,
+                            camera_distance,
+                            0,
+                            camera_distance * 5
+                        );
+                        break;
+                    case "oblq":
+                        // oblique projection is an orthographic projection with shear
+                        // (or rotation, both transofrms should give the same result)
+                        mat4.ortho(
+                            M_Proj,
+                            -camera_distance,
+                            camera_distance,
+                            -camera_distance,
+                            camera_distance,
+                            0,
+                            camera_distance * 5
+                        );
+                        // Angle is arbitrary
+                        let angle = (85 * Math.PI) / 180;
+                        let M_shear = mat4.fromValues(
+                            ...[1, 0, 0, 0],
+                            ...[0, 1, 0, 0],
+                            ...[
+                                1 / Math.tan(-angle),
+                                1 / Math.tan(-angle),
+                                1,
+                                0,
+                            ],
+                            ...[0, 0, 0, 1]
+                        );
+
+                        mat4.multiply(M_Proj, M_Proj, M_shear);
+
+                        break;
+                }
+                // Bind the matrix
+                let ProjLoc = gl.getUniformLocation(
+                    shaderprogram,
+                    "uProjectionMatrix"
+                );
+                gl.uniformMatrix4fv(ProjLoc, false, new Float32Array(M_Proj));
+            }
+
+            // Transforms array of 3 values in -1 to 1 into vec4 in radians
+            function update_directional_light() {
+                V_direction = vec3.fromValues(0, 0, 1);
+
+                vec3.rotateX(
+                    V_direction,
+                    V_direction,
+                    [0, 0, 0],
+                    light_direction[0] * Math.PI
+                );
+                vec3.rotateY(
+                    V_direction,
+                    V_direction,
+                    [0, 0, 0],
+                    light_direction[1] * Math.PI
+                );
+                vec3.rotateZ(
+                    V_direction,
+                    V_direction,
+                    [0, 0, 0],
+                    light_direction[2] * Math.PI
+                );
+
+                light_controls.x.value = light_direction[0];
+                light_controls.y.value = light_direction[1];
+                light_controls.z.value = light_direction[2];
+
+                vec3.normalize(V_direction, V_direction);
+                vec4.set(V_light_dir, ...V_direction, 0);
+            }
+
+            function addObjectToScene(object) {
+                object.model_matrix = mat4.create();
+                objectData.push(object);
+                objectBuffers.push(initObject(object, shaderprogram));
+                if (!is_animation_playing) render();
+                return object;
+            }
+
+            // GLSL shader code
+            const vertCode = `
+                attribute vec4 aNormal;
+                attribute vec4 aPosition;
+                attribute vec4 aColor;
+                attribute vec2 aTexCoord;
+                attribute vec4 aTangent;
+                attribute vec4 aBitangent;
+
+                varying vec4 vColor;
+                varying vec4 vNormal;
+                varying vec2 vTexCoord;
+                varying vec4 vTangent;
+                varying vec4 vBitangent;
+
+                uniform mat4 uViewMatrix;
+                uniform mat4 uProjectionMatrix;
+                uniform mat4 uModelMatrix;
+                uniform mat4 uNormalMatrix;
+
+                varying mat3 vTBN;
+
+                void main() {
+                    gl_Position = uProjectionMatrix * uViewMatrix * uModelMatrix * aPosition;
+
+                    vNormal = uNormalMatrix * aNormal;
+                    
+                    vec3 T = normalize(vec3(uModelMatrix * aTangent));
+                    vec3 B = normalize(vec3(uModelMatrix * aBitangent));
+                    vec3 N = normalize(vec3(uModelMatrix * aNormal));
+                    vTBN = mat3(T,B,N);
+
+                    vColor = aColor;
+                    vTexCoord = aTexCoord;
+                    vTangent = aTangent;
+                    vBitangent = aBitangent;
+                }
+            `;
+
+            const fragCode = `
+                precision mediump float;
+
+                varying vec4 vNormal;
+                varying vec4 vColor;
+                varying vec2 vTexCoord;
+                varying mat3 vTBN;
+
+                uniform bool uUseColor;
+                uniform sampler2D uTexture;
+
+                uniform bool uUseNormalMap;
+                uniform sampler2D uNormalMap;
+                uniform highp mat4 uNormalMatrix;
+
+                uniform mediump vec4 uLightDirection;
+
+                void main() {
+                    lowp vec4 t = texture2D(uTexture, vTexCoord);
+                    highp vec4 n = texture2D(uNormalMap, vTexCoord);
+                    // It's a good idea to normalise the normal vector, to avoid weird behavior later on
+                    highp vec4 mapped_normal = 
+                    normalize(uNormalMatrix * vNormal);
+                    if (uUseNormalMap){
+                        // We need to transform the normal map as well;
+                        mapped_normal = vec4(normalize(vTBN * n.rgb),0.0);
+
+                    }
+
+                    // Calculate the phong lighting model (diffuse and ambient) 
+                    // Directional component:
+                    highp float directional = max(dot(mapped_normal,normalize(uLightDirection)), 0.0);
+                    highp vec3 vLdir = directional * vec3(0.75,0.75,0.75);
+
+                    // Ambient light, value arbitrary
+                    highp vec3 vLamb = vec3(0.15, 0.15, 0.15);
+
+                    // Combined light at fragment:
+                    highp vec3 vLighting = vLdir + vLamb;
+
+                    // If we don't have a texture assigned - use vertex color
+                    if (uUseColor){
+                        t = vColor;
+                    }
+                    gl_FragColor = vec4(t.rgb * vLighting, 255);
+                }
+            `;
+
+            function render(now) {
+                if (!now) now = performance.now();
+                let delta = now - last_frame_time;
+                last_frame_time = now;
+
+                let default_anim_speed = 0.002;
+
+                // Remove previous frame
+                gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+                // Move light
+                if (is_animation_playing && light_anim) {
+                    light_direction[1] = ((light_direction[1] + 1.001) % 2) - 1;
+                    update_directional_light();
+                }
+
+                // Bind light
+                let LightDirLoc = gl.getUniformLocation(
+                    shaderprogram,
+                    "uLightDirection"
+                );
+                gl.uniform4fv(LightDirLoc, new Float32Array(V_light_dir));
+
+                // Render objects
+                for (let i = 0; i < objectBuffers.length; i++) {
+                    let object = objectData[i];
+                    // Pass through the texture and normal map
+                    if (object.texture)
+                        objectBuffers[i].texture = object.texture;
+                    if (object.normal_map)
+                        objectBuffers[i].normal_map = object.normal_map;
+
+                    // Perform the animation transformation if required
+                    if (is_animation_playing && object.animation) {
+                        let anim_speed = object.animation_speed
+                            ? object.animation_speed
+                            : default_anim_speed;
+                        object.animation(delta, anim_speed);
+                    }
+
+                    // Bind the model matrix
+                    let ModelLoc = gl.getUniformLocation(
+                        shaderprogram,
+                        "uModelMatrix"
+                    );
+                    gl.uniformMatrix4fv(
+                        ModelLoc,
+                        false,
+                        new Float32Array(object.model_matrix)
+                    );
+
+                    // Create normal transform matrix
+                    let M_normal = mat4.create();
+                    mat4.multiply(M_normal, M_normal, object.model_matrix);
+                    mat4.transpose(M_normal, M_normal);
+                    mat4.invert(M_normal, M_normal);
+                    let NormalLoc = gl.getUniformLocation(
+                        shaderprogram,
+                        "uNormalMatrix"
+                    );
+                    gl.uniformMatrix4fv(
+                        NormalLoc,
+                        false,
+                        new Float32Array(M_normal)
+                    );
+
+                    // Draw
+                    drawObject(objectBuffers[i], shaderprogram);
+                }
+                // If we're animating - request a rerender at the next frame
+                if (is_animation_playing) requestAnimationFrame(render);
+            }
+
+            function loadTexture(resource, textureI, i) {
+                // Code adapted from Lab 3
+                let texture = gl.createTexture();
+                gl.activeTexture(textureI);
+                gl.bindTexture(gl.TEXTURE_2D, texture);
+
+                gl.texImage2D(
+                    gl.TEXTURE_2D,
+                    0,
+                    gl.RGBA,
+                    1,
+                    1,
+                    0,
+                    gl.RGBA,
+                    gl.UNSIGNED_BYTE,
+                    new Uint8Array([127, 127, 255, 255])
+                );
+
+                var image = new Image();
+
+                image.addEventListener("load", function () {
+                    gl.activeTexture(textureI);
+                    gl.bindTexture(gl.TEXTURE_2D, texture);
+                    gl.texImage2D(
+                        gl.TEXTURE_2D,
+                        0,
+                        gl.RGBA,
+                        gl.RGBA,
+                        gl.UNSIGNED_BYTE,
+                        image
+                    );
+                    gl.generateMipmap(gl.TEXTURE_2D);
+                    if (!is_animation_playing) render();
+                });
+
+                image.src = resource;
+                gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+                return { i: i, textureI: textureI, buffer: texture };
+            }
+
+            function shear(angle) {
+                let M_shear = mat4.fromValues(
+                    ...[1, 0, 0, 0],
+                    ...[0, 1, 0, 0],
+                    ...[0, 1 / Math.tan(-angle), 1, 0],
+                    ...[0, 0, 0, 1]
+                );
+                return M_shear;
+            }
+
+            // =============== BEGIN INITIALISATION LOGIC ===============
+            // Canvas and gl context
+            var canvas = document.getElementById("gl-canvas");
+            canvas.height = document.defaultView.innerHeight;
+            canvas.width = canvas.height;
+
+            var gl = canvas.getContext("webgl");
+            canvas.addEventListener("wheel", handle_wheel_input);
+
+            // Set up demo controls
+            let anim_toggle = document.getElementById("anim-toggle");
+            let proj_selector = document.getElementById("proj-selector");
+
+            let light_controls = {
+                x: document.getElementById("d-light-x"),
+                y: document.getElementById("d-light-y"),
+                z: document.getElementById("d-light-z"),
+            };
+
+            let shering_anim_toggle = document.getElementById(
+                "shearing-anim-toggle"
+            );
+            let dir_light_anim_toggle = document.getElementById(
+                "dir-light-anim-toggle"
+            );
+
+            shering_anim_toggle.addEventListener(
+                "change",
+                (ev) => (shearing_anim = ev.target.checked)
+            );
+            dir_light_anim_toggle.addEventListener(
+                "change",
+                (ev) => (light_anim = ev.target.checked)
+            );
+            anim_toggle.addEventListener("click", toggle_anim);
+            proj_selector.addEventListener("change", select_projection);
+            for (let control in light_controls) {
+                light_controls[control].addEventListener(
+                    "input",
+                    move_directional_light
+                );
+            }
+
+            // Initialise the canvas
+            glInit();
+
+            // Globals
+            var last_frame_time = 0;
+            var is_animation_playing = false;
+            var camera_rotation = [0, 0.5, 0];
+            var light_direction = [-0.1, 0, 0];
+            var camera_distance = 5;
+            var objectData = [];
+            var objectBuffers = [];
+            var projection_type = "pers";
+            var textures = [];
+            var shaderprogram = createProgram(vertCode, fragCode);
+            var M_view = mat4.create();
+            var V_light_dir = vec4.fromValues(0, 0, 1, 0);
+            var shearing_anim = false;
+            var light_anim = true;
+
+            // Sync controls to globals
+            proj_selector.value = projection_type;
+            shering_anim_toggle.checked = shearing_anim;
+            dir_light_anim_toggle.checked = light_anim;
+
+            // Load Textures
+            textures.push(
+                loadTexture("tex/amethyst-diffuse.jpg", gl.TEXTURE0, 0)
+            );
+            textures.push(
+                loadTexture("tex/darkwood-diffuse.jpg", gl.TEXTURE1, 1)
+            );
+            textures.push(
+                loadTexture("tex/amethyst-normal.jpg", gl.TEXTURE2, 2)
+            );
+            textures.push(
+                loadTexture("tex/darkwood-nor-gl.jpg", gl.TEXTURE3, 3)
+            );
+            textures.push(
+                loadTexture("tex/gravel-color.jpg", gl.TEXTURE4, 4)
+            );
+            textures.push(
+                loadTexture("tex/gravel-normal.jpg", gl.TEXTURE5, 5)
+            );
+
+            // Calculate camera and projection matrices, and directional light vector
+            update_camera_mx();
+            update_directional_light();
+
+            // Load and position objects, bind animations
+            loadObjFile("obj/BlenderMonkey.obj")
+                .then(addObjectToScene)
+                .then((object) => {
+                    let M_transform = mat4.create();
+                    let rotation = quat.create();
+                    quat.rotateZ(rotation, rotation, Math.PI);
+                    mat4.fromRotationTranslationScale(
+                        M_transform,
+                        rotation,
+                        [-1, -2, -0.5],
+                        [0.5, 0.5, 0.5]
+                    );
+                    mat4.multiply(
+                        object.model_matrix,
+                        M_transform,
+                        object.model_matrix
+                    );
+                    object.shear_angle = 0;
+                    object.shear_direction = 1;
+                    object.animation = (delta, anim_speed) => {
+                        if (shearing_anim) {
+                            if (object.shear_angle * object.shear_direction > 1)
+                                object.shear_direction =
+                                    -object.shear_direction;
+                            let andle_d =
+                                delta * 1 * anim_speed * object.shear_direction;
+                            let angle_r = (1 / 2) * Math.PI - andle_d;
+                            object.shear_angle += andle_d;
+                            let M_shear = shear(angle_r);
+                            mat4.multiply(
+                                object.model_matrix,
+                                M_shear,
+                                object.model_matrix
+                            );
+                        }
+                    };
+
+                    if (!is_animation_playing) render();
+                });
+            loadObjFile("obj/Cube.obj")
+                .then(addObjectToScene)
+                .then((object) => {
+                    object.texture = textures[4];
+                    object.normal_map = textures[5];
+                    object.shear_angle = 0;
+                    object.shear_direction = 1;
+                    object.animation_speed = 0.0005;
+                    object.animation = (delta, anim_speed) => {
+                        let M_anim = mat4.create();
+                        mat4.rotateZ(M_anim, M_anim, delta * anim_speed);
+                        mat4.multiply(
+                            object.model_matrix,
+                            M_anim,
+                            object.model_matrix
+                        );
+                        if (shearing_anim) {
+                            if (object.shear_angle * object.shear_direction > 1)
+                                object.shear_direction =
+                                    -object.shear_direction;
+                            let andle_d =
+                                delta * anim_speed * object.shear_direction;
+                            let angle_r = (1 / 2) * Math.PI - andle_d;
+                            object.shear_angle += andle_d;
+                            let M_shear = shear(angle_r);
+                            mat4.multiply(
+                                object.model_matrix,
+                                M_shear,
+                                object.model_matrix
+                            );
+                        }
+                    };
+                    if (!is_animation_playing) render();
+                });
+            loadObjFile("obj/Plane.obj")
+                .then(addObjectToScene)
+                .then((object) => {
+                    object.texture = textures[1];
+                    object.normal_map = textures[3];
+                    let M_transform = mat4.create();
+                    mat4.fromTranslation(M_transform, [0, 0, -1.5]);
+
+                    mat4.multiply(
+                        object.model_matrix,
+                        M_transform,
+                        object.model_matrix
+                    );
+                    if (!is_animation_playing) render();
+                });
+            loadObjFile("obj/Ico.obj")
+                .then(addObjectToScene)
+                .then((object) => {
+                    let M_transform = mat4.create();
+                    mat4.fromRotation(M_transform, Math.PI, [0, 1, 1]);
+                    mat4.multiply(
+                        object.model_matrix,
+                        M_transform,
+                        object.model_matrix
+                    );
+                    mat4.fromTranslation(M_transform, [-1, 1.5, 2]);
+                    mat4.multiply(
+                        object.model_matrix,
+                        M_transform,
+                        object.model_matrix
+                    );
+
+                    object.texture = textures[4];
+                    object.normal_map = textures[5];
+
+                    object.shear_angle = 0;
+                    object.shear_direction = 1;
+                    object.animation_speed = 0.005;
+                    object.animation = (delta, anim_speed) => {
+                        if (shearing_anim) {
+                            if (object.shear_angle * object.shear_direction > 1)
+                                object.shear_direction =
+                                    -object.shear_direction;
+                            let andle_d =
+                                delta * 1 * anim_speed * object.shear_direction;
+                            let angle_r = (1 / 2) * Math.PI - andle_d;
+                            object.shear_angle += andle_d;
+                            let M_shear = shear(angle_r);
+                            mat4.multiply(
+                                object.model_matrix,
+                                M_shear,
+                                object.model_matrix
+                            );
+                        }
+                    };
+                    if (!is_animation_playing) render();
+                });
+            loadObjFile("obj/QuickLamp.obj")
+                .then(addObjectToScene)
+                .then((object) => {
+                    let M_transform = mat4.create();
+                    mat4.fromTranslation(M_transform, [1, 1, -1.49]);
+
+                    mat4.multiply(
+                        object.model_matrix,
+                        M_transform,
+                        object.model_matrix
+                    );
+
+                    object.shear_angle = 0;
+                    object.shear_direction = 1;
+                    object.animation_speed = 0.005;
+                    object.animation = (delta, anim_speed) => {
+                        if (shearing_anim) {
+                            if (object.shear_angle * object.shear_direction > 1)
+                                object.shear_direction =
+                                    -object.shear_direction;
+                            let andle_d =
+                                delta * 1 * anim_speed * object.shear_direction;
+                            let angle_r = (1 / 2) * Math.PI - andle_d;
+                            object.shear_angle += andle_d;
+                            let M_shear = shear(angle_r);
+                            mat4.multiply(
+                                object.model_matrix,
+                                M_shear,
+                                object.model_matrix
+                            );
+                        }
+                    };
+
+                    if (!is_animation_playing) render();
+                });
+
+            // Render
+            render();
+        </script>
+    </body>
+</html>
