@@ -526,6 +526,11 @@
                         image
                     );
                     gl.generateMipmap(gl.TEXTURE_2D);
+                    if (gl.getError() === 1282) {
+                        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+                        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+                        console.log("Dropped the mipmap")
+                    }
                     if (!is_animation_playing) render();
                 });
 

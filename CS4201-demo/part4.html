@@ -12,8 +12,8 @@
             <div style="display: flex; gap: 10px">
                 <a href="./part1.html"> part 1 </a>
                 <a href="./part2.html"> part 2 </a>
-                <a> part 3 </a>
-                <a href="./part4.html"> part 4 </a>
+                <a href="./part3.html"> part 3 </a>
+                <a> part 4 </a>
             </div>
             <p>
                 The scene can be rotated using your mouse/touchpad vertical and
@@ -24,16 +24,14 @@
                 hold down alt to transform your verical scroll to horizontal)
             </p>
             <p>
-                The Cube, plane and icosahedron have normal maps applied to them
+                The model is a 3D scan of an apothecary vase, made by
+                <a
+                    href="https://sketchfab.com/3d-models/hydria-apothecary-vase-7d6938c0c0b54b06a0210a982a73023e"
+                    >Virtual Museums of Małopolska</a
+                >, the scan is dedicated to the public domain.
             </p>
             <h3>Animation Controls</h3>
             <button id="anim-toggle">Toggle Animation</button>
-            <div>
-                <input type="checkbox" id="shearing-anim-toggle" />
-                <label for="sheadring-toggle">
-                    Enable shearing (as requried by part 2)
-                </label>
-            </div>
             <div>
                 <input type="checkbox" id="dir-light-anim-toggle" />
                 <label for="sheadring-toggle">Animate directional light</label>
@@ -237,7 +235,6 @@
                     0
                 );
             }
-
             // Fucntion to load a mesh from a .obj file, as requred in part 4
             function loadObjFile(resourceLocation) {
                 return fetch(resourceLocation)
@@ -441,9 +438,7 @@
                 update_camera_mx();
             }
 
-            // Position camera, based on the value of the value of the globals
             function update_camera_mx() {
-                // Generate a basic lookat matrix
                 mat4.lookAt(
                     M_view,
                     [camera_distance, 0, 0],
@@ -453,15 +448,11 @@
 
                 let M_view_transform = mat4.create();
                 let M_view_ry = mat4.create();
-                // We want to rotate over a local Y
-                // (much easier to keep track), so we'll make a unit vector for +y, rotate, the same way we do the object, and use that as an axis for rotation
                 let vec_local_y = vec3.fromValues(0, 1, 0);
 
                 let M_view_rz = mat4.create();
-                // For z rotation, we want to use the global z, so we can use the buit in function
                 mat4.fromZRotation(M_view_rz, camera_rotation[2]);
 
-                // Follow the object's rotation with the +y vector
                 vec3.rotateZ(
                     vec_local_y,
                     vec_local_y,
@@ -469,24 +460,18 @@
                     -camera_rotation[2]
                 );
 
-                // Apply the local y rotation
                 mat4.fromRotation(M_view_ry, camera_rotation[1], vec_local_y);
 
-                // Make a tranform matrix
                 mat4.multiply(M_view_transform, M_view_rz, M_view_ry);
 
-                // Apply the transform
                 mat4.multiply(M_view, M_view, M_view_transform);
 
-                // Bind matrix to shader vars
                 let ViewLoc = gl.getUniformLocation(
                     shaderprogram,
                     "uViewMatrix"
                 );
                 gl.uniformMatrix4fv(ViewLoc, false, new Float32Array(M_view));
 
-                // We might also need to update a projection matrix, afeter moving the camera, so we'll do that now
-                // (if the camera distance got changed)
                 update_projection_mx();
 
                 // If we're not in an animation loop, we need a manual rerender
@@ -517,8 +502,6 @@
                         );
                         break;
                     case "oblq":
-                        // oblique projection is an orthographic projection with shear
-                        // (or rotation, both transofrms should give the same result)
                         mat4.ortho(
                             M_Proj,
                             -camera_distance,
@@ -528,7 +511,6 @@
                             0,
                             camera_distance * 5
                         );
-                        // Angle is arbitrary
                         let angle = (85 * Math.PI) / 180;
                         let M_shear = mat4.fromValues(
                             ...[1, 0, 0, 0],
@@ -546,7 +528,6 @@
 
                         break;
                 }
-                // Bind the matrix
                 let ProjLoc = gl.getUniformLocation(
                     shaderprogram,
                     "uProjectionMatrix"
@@ -554,7 +535,6 @@
                 gl.uniformMatrix4fv(ProjLoc, false, new Float32Array(M_Proj));
             }
 
-            // Transforms array of 3 values in -1 to 1 into vec4 in radians
             function update_directional_light() {
                 V_direction = vec3.fromValues(0, 0, 1);
 
@@ -687,32 +667,26 @@
 
                 let default_anim_speed = 0.002;
 
-                // Remove previous frame
                 gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-                // Move light
                 if (is_animation_playing && light_anim) {
                     light_direction[1] = ((light_direction[1] + 1.001) % 2) - 1;
                     update_directional_light();
                 }
 
-                // Bind light
                 let LightDirLoc = gl.getUniformLocation(
                     shaderprogram,
                     "uLightDirection"
                 );
                 gl.uniform4fv(LightDirLoc, new Float32Array(V_light_dir));
 
-                // Render objects
                 for (let i = 0; i < objectBuffers.length; i++) {
                     let object = objectData[i];
-                    // Pass through the texture and normal map
                     if (object.texture)
                         objectBuffers[i].texture = object.texture;
                     if (object.normal_map)
                         objectBuffers[i].normal_map = object.normal_map;
 
-                    // Perform the animation transformation if required
                     if (is_animation_playing && object.animation) {
                         let anim_speed = object.animation_speed
                             ? object.animation_speed
@@ -720,7 +694,6 @@
                         object.animation(delta, anim_speed);
                     }
 
-                    // Bind the model matrix
                     let ModelLoc = gl.getUniformLocation(
                         shaderprogram,
                         "uModelMatrix"
@@ -731,7 +704,6 @@
                         new Float32Array(object.model_matrix)
                     );
 
-                    // Create normal transform matrix
                     let M_normal = mat4.create();
                     mat4.multiply(M_normal, M_normal, object.model_matrix);
                     mat4.transpose(M_normal, M_normal);
@@ -746,15 +718,12 @@
                         new Float32Array(M_normal)
                     );
 
-                    // Draw
                     drawObject(objectBuffers[i], shaderprogram);
                 }
-                // If we're animating - request a rerender at the next frame
                 if (is_animation_playing) requestAnimationFrame(render);
             }
 
             function loadTexture(resource, textureI, i) {
-                // Code adapted from Lab 3
                 let texture = gl.createTexture();
                 gl.activeTexture(textureI);
                 gl.bindTexture(gl.TEXTURE_2D, texture);
@@ -785,6 +754,11 @@
                         image
                     );
                     gl.generateMipmap(gl.TEXTURE_2D);
+                    if (gl.getError() === 1282) {
+                        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+                        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+                        console.log("Dropped the mipmap")
+                    }
                     if (!is_animation_playing) render();
                 });
 
@@ -829,10 +803,6 @@
                 "dir-light-anim-toggle"
             );
 
-            shering_anim_toggle.addEventListener(
-                "change",
-                (ev) => (shearing_anim = ev.target.checked)
-            );
             dir_light_anim_toggle.addEventListener(
                 "change",
                 (ev) => (light_anim = ev.target.checked)
@@ -853,7 +823,7 @@
             var last_frame_time = 0;
             var is_animation_playing = false;
             var camera_rotation = [0, 0.5, 0];
-            var light_direction = [-0.1, 0, 0];
+            var light_direction = [-0.4, 0, -0.5];
             var camera_distance = 5;
             var objectData = [];
             var objectBuffers = [];
@@ -867,27 +837,22 @@
 
             // Sync controls to globals
             proj_selector.value = projection_type;
-            shering_anim_toggle.checked = shearing_anim;
             dir_light_anim_toggle.checked = light_anim;
 
             // Load Textures
             textures.push(
-                loadTexture("tex/amethyst-diffuse.jpg", gl.TEXTURE0, 0)
+                loadTexture(
+                    "tex/KGZ_5919_Waza_typu_hydria_8K.jpg",
+                    gl.TEXTURE0,
+                    0
+                )
             );
             textures.push(
-                loadTexture("tex/darkwood-diffuse.jpg", gl.TEXTURE1, 1)
-            );
-            textures.push(
-                loadTexture("tex/amethyst-normal.jpg", gl.TEXTURE2, 2)
-            );
-            textures.push(
-                loadTexture("tex/darkwood-nor-gl.jpg", gl.TEXTURE3, 3)
-            );
-            textures.push(
-                loadTexture("tex/gravel-color.jpg", gl.TEXTURE4, 4)
-            );
-            textures.push(
-                loadTexture("tex/gravel-normal.jpg", gl.TEXTURE5, 5)
+                loadTexture(
+                    "tex/KGZ_5919_Waza_typu_hydria_normal_map.png",
+                    gl.TEXTURE1,
+                    1
+                )
             );
 
             // Calculate camera and projection matrices, and directional light vector
@@ -895,52 +860,21 @@
             update_directional_light();
 
             // Load and position objects, bind animations
-            loadObjFile("obj/BlenderMonkey.obj")
+            loadObjFile("obj/KGZ_5919_Waza_typu_hydria_.OBJ")
                 .then(addObjectToScene)
                 .then((object) => {
                     let M_transform = mat4.create();
-                    let rotation = quat.create();
-                    quat.rotateZ(rotation, rotation, Math.PI);
-                    mat4.fromRotationTranslationScale(
-                        M_transform,
-                        rotation,
-                        [-1, -2, -0.5],
-                        [0.5, 0.5, 0.5]
-                    );
+                    mat4.fromScaling(M_transform, [1 / 80, 1 / 80, 1 / 80]);
+                    mat4.rotateZ(M_transform, M_transform, Math.PI / 2);
+                    mat4.rotateX(M_transform, M_transform, Math.PI / 2);
+
                     mat4.multiply(
                         object.model_matrix,
                         M_transform,
                         object.model_matrix
                     );
-                    object.shear_angle = 0;
-                    object.shear_direction = 1;
-                    object.animation = (delta, anim_speed) => {
-                        if (shearing_anim) {
-                            if (object.shear_angle * object.shear_direction > 1)
-                                object.shear_direction =
-                                    -object.shear_direction;
-                            let andle_d =
-                                delta * 1 * anim_speed * object.shear_direction;
-                            let angle_r = (1 / 2) * Math.PI - andle_d;
-                            object.shear_angle += andle_d;
-                            let M_shear = shear(angle_r);
-                            mat4.multiply(
-                                object.model_matrix,
-                                M_shear,
-                                object.model_matrix
-                            );
-                        }
-                    };
-
-                    if (!is_animation_playing) render();
-                });
-            loadObjFile("obj/Cube.obj")
-                .then(addObjectToScene)
-                .then((object) => {
-                    object.texture = textures[4];
-                    object.normal_map = textures[5];
-                    object.shear_angle = 0;
-                    object.shear_direction = 1;
+                    object.texture = textures[0];
+                    object.normal_map = textures[1];
                     object.animation_speed = 0.0005;
                     object.animation = (delta, anim_speed) => {
                         let M_anim = mat4.create();
@@ -950,114 +884,7 @@
                             M_anim,
                             object.model_matrix
                         );
-                        if (shearing_anim) {
-                            if (object.shear_angle * object.shear_direction > 1)
-                                object.shear_direction =
-                                    -object.shear_direction;
-                            let andle_d =
-                                delta * anim_speed * object.shear_direction;
-                            let angle_r = (1 / 2) * Math.PI - andle_d;
-                            object.shear_angle += andle_d;
-                            let M_shear = shear(angle_r);
-                            mat4.multiply(
-                                object.model_matrix,
-                                M_shear,
-                                object.model_matrix
-                            );
-                        }
                     };
-                    if (!is_animation_playing) render();
-                });
-            loadObjFile("obj/Plane.obj")
-                .then(addObjectToScene)
-                .then((object) => {
-                    object.texture = textures[1];
-                    object.normal_map = textures[3];
-                    let M_transform = mat4.create();
-                    mat4.fromTranslation(M_transform, [0, 0, -1.5]);
-
-                    mat4.multiply(
-                        object.model_matrix,
-                        M_transform,
-                        object.model_matrix
-                    );
-                    if (!is_animation_playing) render();
-                });
-            loadObjFile("obj/Ico.obj")
-                .then(addObjectToScene)
-                .then((object) => {
-                    let M_transform = mat4.create();
-                    mat4.fromRotation(M_transform, Math.PI, [0, 1, 1]);
-                    mat4.multiply(
-                        object.model_matrix,
-                        M_transform,
-                        object.model_matrix
-                    );
-                    mat4.fromTranslation(M_transform, [-1, 1.5, 2]);
-                    mat4.multiply(
-                        object.model_matrix,
-                        M_transform,
-                        object.model_matrix
-                    );
-
-                    object.texture = textures[4];
-                    object.normal_map = textures[5];
-
-                    object.shear_angle = 0;
-                    object.shear_direction = 1;
-                    object.animation_speed = 0.005;
-                    object.animation = (delta, anim_speed) => {
-                        if (shearing_anim) {
-                            if (object.shear_angle * object.shear_direction > 1)
-                                object.shear_direction =
-                                    -object.shear_direction;
-                            let andle_d =
-                                delta * 1 * anim_speed * object.shear_direction;
-                            let angle_r = (1 / 2) * Math.PI - andle_d;
-                            object.shear_angle += andle_d;
-                            let M_shear = shear(angle_r);
-                            mat4.multiply(
-                                object.model_matrix,
-                                M_shear,
-                                object.model_matrix
-                            );
-                        }
-                    };
-                    if (!is_animation_playing) render();
-                });
-            loadObjFile("obj/QuickLamp.obj")
-                .then(addObjectToScene)
-                .then((object) => {
-                    let M_transform = mat4.create();
-                    mat4.fromTranslation(M_transform, [1, 1, -1.49]);
-
-                    mat4.multiply(
-                        object.model_matrix,
-                        M_transform,
-                        object.model_matrix
-                    );
-
-                    object.shear_angle = 0;
-                    object.shear_direction = 1;
-                    object.animation_speed = 0.005;
-                    object.animation = (delta, anim_speed) => {
-                        if (shearing_anim) {
-                            if (object.shear_angle * object.shear_direction > 1)
-                                object.shear_direction =
-                                    -object.shear_direction;
-                            let andle_d =
-                                delta * 1 * anim_speed * object.shear_direction;
-                            let angle_r = (1 / 2) * Math.PI - andle_d;
-                            object.shear_angle += andle_d;
-                            let M_shear = shear(angle_r);
-                            mat4.multiply(
-                                object.model_matrix,
-                                M_shear,
-                                object.model_matrix
-                            );
-                        }
-                    };
-
                     if (!is_animation_playing) render();
                 });
 
